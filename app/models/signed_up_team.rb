@@ -57,12 +57,12 @@ class SignedUpTeam < ActiveRecord::Base
   def self.release_topics_selected_by_team_for_assignment(team_id, assignment_id)
     old_teams_signups = SignedUpTeam.where(team_id: team_id)
 
-    # Done if the team is not found
+    # If the team is not found do not need to release topics, simply return from the method.
     return if old_teams_signups.nil?
     # Otherwise, if the team has signed up for the topic and they are on the waitlist then remove that team from the waitlist.
     old_teams_signups.each do |old_teams_signup|
       if old_teams_signup.is_waitlisted == false # i.e., if the old team was occupying a slot, & thus is releasing a slot ...
-        first_waitlisted_signup = SignedUpTeam.find_by(topic_id: old_teams_signup.topic_id, is_waitlisted:  true)
+        first_waitlisted_signup = SignedUpTeam.find_by(topic_id: old_teams_signup.topic_id, is_waitlisted: true)
         Invitation.remove_waitlists_for_team(old_teams_signup.topic_id, assignment_id) unless first_waitlisted_signup.nil?
       end
       old_teams_signup.destroy
