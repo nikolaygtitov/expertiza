@@ -2,7 +2,7 @@ class Team < ActiveRecord::Base
   has_many :teams_users, dependent: :destroy
   has_many :users, through: :teams_users
   has_many :join_team_requests, dependent: :destroy
-  has_one :team_node, foreign_key: :node_object_id, dependent: :destroy
+  has_one :team_node, inverse_of: false, foreign_key: :node_object_id, dependent: :destroy
   has_many :signed_up_teams, dependent: :destroy
   has_many :bids, dependent: :destroy
   has_paper_trail
@@ -126,7 +126,7 @@ class Team < ActiveRecord::Base
   def self.create_team_from_single_users(min_team_size, parent, team_type, users)
     num_of_teams = users.length.fdiv(min_team_size).ceil
     next_team_member_index = 0
-    for i in (1..num_of_teams).to_a
+    (1..num_of_teams).to_a.each do |i|
       team = Object.const_get(team_type + 'Team').create(name: 'Team_' + i.to_s, parent_id: parent.id)
       TeamNode.create(parent_id: parent.id, node_object_id: team.id)
       min_team_size.times do
@@ -153,7 +153,7 @@ class Team < ActiveRecord::Base
   end
 
   # Generate the team name
-  def self.generate_team_name(team_name_prefix = '')
+  def self.generate_team_name
     counter = 1
     loop do
       team_name = "Team_#{counter}"
@@ -164,36 +164,29 @@ class Team < ActiveRecord::Base
 
   # Extract team members from the csv and push to DB,  changed to hash by E1776
   # todo check if the starting_index is necessary
-  def import_team_members(starting_index = 0, row_hash)
-    starting_index
+  def import_team_members(row_hash, starting_index = 0)
     index = 0
     row_hash[:teammembers].each do |teammember|
       next if index < starting_index # not sure this will work, hash is not ordered like array
       user = User.find_by(name: teammember.to_s)
-      if user.nil?
-        raise ImportError, "The user '#{teammember.to_s}' was not found. <a href='/users/new'>Create</a> this user?"
-      else
-        add_member(user) if TeamsUser.find_by(team_id: id, user_id: user.id).nil?
-      end
+      raise ImportError, "The user '#{teammember}' was not found. <a href='/users/new'>Create</a> this user?" if user.nil?
+      add_member(user) if TeamsUser.find_by(team_id: id, user_id: user.id).nil?
       index += 1
     end
   end
 
   #  changed to hash by E1776
   def self.import(row_hash, id, options, teamtype)
-
-    raise ArgumentError, "Not enough fields on this line." if row_hash.empty? || (row_hash[:teammembers].length < 2 && (options[:has_teamname] == "true_first" || options[:has_teamname] == "true_last")) || (row_hash[:teammembers].empty? && (options[:has_teamname] == "true_first" || options[:has_teamname] == "true_last"))
-    if options[:has_teamname] == "true_first" || options[:has_teamname] == "true_last"
+    raise ArgumentError, 'Not enough fields on this line.' if row_hash.empty? ||
+        (row_hash[:teammembers].length < 2 && (options[:has_teamname] == 'true_first' || options[:has_teamname] == 'true_last'))
+    if options[:has_teamname] == 'true_first' || options[:has_teamname] == 'true_last'
       name = row_hash[:teamname].to_s
-      team = where(["name =? && parent_id =?", name, id]).first
+      team = find_by(name: name, parent_id: id)
       team_exists = !team.nil?
       name = handle_duplicate(team, name, id, options[:handle_dups], teamtype)
     else
-      if teamtype.is_a?(CourseTeam)
-        name = self.generate_team_name(Course.find(id).name)
-      elsif teamtype.is_a?(AssignmentTeam)
-        name = self.generate_team_name(Assignment.find(id).name)
-      end
+      name = self.generate_team_name if teamtype.is_a?(CourseTeam)
+      name = self.generate_team_name if teamtype.is_a?(AssignmentTeam)
     end
     if name
       team = Object.const_get(teamtype.to_s).create_team_and_node(id)
@@ -202,36 +195,29 @@ class Team < ActiveRecord::Base
     end
 
     # insert team members into team unless team was pre-existing & we ignore duplicate teams
-
     team.import_team_members(row_hash) unless team_exists && options[:handle_dups] == "ignore"
   end
 
   # Handle existence of the duplicate team
   def self.handle_duplicate(team, name, id, handle_dups, teamtype)
     return name if team.nil? # no duplicate
-    return nil if handle_dups == "ignore" # ignore: do not create the new team
     if handle_dups == "rename" # rename: rename new team
-      if teamtype.is_a?(CourseTeam)
-        return self.generate_team_name(Course.find(id).name)
-      elsif  teamtype.is_a?(AssignmentTeam)
-        return self.generate_team_name(Assignment.find(id).name)
-      end
+      return self.generate_team_name if teamtype.is_a?(CourseTeam)
+      return self.generate_team_name if teamtype.is_a?(AssignmentTeam)
     end
     if handle_dups == "replace" # replace: delete old team
       team.delete
       return name
-    else # handle_dups = "insert"
-      return nil
     end
+    # At this point handle_dups = "ignore": do not create the new team
+    # Or handle_dups = "insert": do not insert
+    nil
   end
 
   # Export the teams to csv
   def self.export(csv, parent_id, options, teamtype)
-    if teamtype.is_a?(CourseTeam)
-      teams = CourseTeam.where(parent_id: parent_id)
-    elsif teamtype.is_a?(AssignmentTeam)
-      teams = AssignmentTeam.where(parent_id: parent_id)
-    end
+    teams = CourseTeam.where(parent_id: parent_id) if teamtype.is_a?(CourseTeam)
+    teams = AssignmentTeam.where(parent_id: parent_id) if teamtype.is_a?(AssignmentTeam)
     teams.each do |team|
       output = []
       output.push(team.name)
@@ -248,8 +234,8 @@ class Team < ActiveRecord::Base
 
   # Create the team with corresponding tree node
   def self.create_team_and_node(id)
-    parent = parent_model id # current_task will be either a course object or an assignment object. # current_task will be either a course object or an assignment object.
-    team_name = Team.generate_team_name(parent.name)
+    # current_task will be either a course object or an assignment object.
+    team_name = Team.generate_team_name
     team = self.create(name: team_name, parent_id: id)
     # new teamnode will have current_task.id as parent_id and team_id as node_object_id.
     TeamNode.create(parent_id: id, node_object_id: team.id)
