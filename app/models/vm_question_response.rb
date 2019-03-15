@@ -64,20 +64,21 @@ class VmQuestionResponse
       reviews = participant.metareviews
       response_map = 'MetareviewResponseMap'.constantize
     end
-
-    unless reviews.nil?
-      reviews.each do |review|
-        review_mapping = response_map.find_by(id: review.map_id)
-        if review_mapping.present?
-          participant = Participant.find(review_mapping.reviewer_id)
-          @list_of_reviewers << participant
-          @list_of_reviews << review
-        end
-        answers = Answer.where(response_id: review.response_id)
-        answers.each do |answer|
-          add_answer(answer)
-        end
+    # Return if questionnaire type did not match any of given types.
+    return if reviews.nil?
+    # Otherwise, add all found reviews to the list of reviews, find participant of each review, and add him/her to the
+    # list of reviewers, find and add all review answers.
+    reviews.each do |review|
+      review_mapping = response_map.find_by(id: review.map_id)
+      if review_mapping.present?
+        participant = Participant.find(review_mapping.reviewer_id)
+        @list_of_reviewers << participant
       end
+      answers = Answer.where(response_id: review.response_id)
+      answers.each do |answer|
+        add_answer(answer)
+      end
+      @list_of_reviews << review
     end
   end
 
